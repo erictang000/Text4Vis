@@ -10,6 +10,8 @@ import random
 from PIL import Image
 import math
 import copy
+from .rand_augment import create_random_augment
+from torchvision import transforms
 
 
 class VideoRecord(object):
@@ -209,7 +211,16 @@ class Video_dataset(data.Dataset):
             images.extend(seg_imgs)
             if p < len(video_list):
                 p += 1
+        if self.random_shift: # if train
+            aug_transform = create_random_augment(
+                    input_size=(224,224),
+                    auto_augment="rand-m9-n2-mstd0.5-inc1",
+                    interpolation="bicubic",
+                )
+            images = aug_transform(images)
+
         process_data, record_label = self.transform((images,record.label))
+
         return process_data, record_label
 
     def __len__(self):

@@ -7,5 +7,5 @@ else
 fi
 
 now=$(date +"%Y%m%d_%H%M%S")
-python -m torch.distributed.launch --master_port 1237 --nproc_per_node=8 \
+python -m torch.distributed.launch --master_port 1237 --nproc_per_node=4 \
          train.py  --config ${config} --log_time $now

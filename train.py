@@ -33,6 +33,7 @@ from utils.Augmentation import get_augmentation
 from utils.solver import _lr_scheduler
 from modules.text_prompt import text_prompt
 
+import wandb
 
 
 
@@ -116,6 +117,14 @@ def main(args):
     logger.info(pp.pformat(config))
     logger.info("------------------------------------")
     logger.info("storing name: {}".format(working_dir))
+
+    run = wandb.init(
+        # Set the project where this run will be logged
+        project="leaky_video",
+        entity="erictang000",
+        name="ViT-B/16_replicate",
+        group="text4vis")
+    
 
 
 
@@ -217,11 +226,11 @@ def main(args):
         model.eval()
         with torch.no_grad():
             classes_features = model.encode_text(classes)  # [n_class dim]
-        # if dist.get_rank() == 0:
-        #     torch.save(classes_features.cpu(), class_feats_file)
+        if dist.get_rank() == 0:
+            torch.save(classes_features.cpu(), class_feats_file)
     
     # random init
-    # classes_features = torch.empty(n_class, config.network.n_emb)
+    # classes_features = torch.nn.Parameter(torch.empty(n_class, config.network.n_emb, requires_grad=True))
     # nn.init.normal_(classes_features, std=1)
 
     # distilbert init
@@ -275,6 +284,8 @@ def main(args):
             clip_params.append(param)
         else:
             other_params.append(param)
+    # if not config.network.fix_text:
+    #     other_params.append(classes_features)
     optimizer = optim.AdamW([{'params': clip_params, 'lr': config.solver.lr * config.solver.clip_ratio}, 
                             {'params': other_params, 'lr': config.solver.lr}],
                             betas=(0.9, 0.999), lr=config.solver.lr, eps=1e-8,
@@ -284,6 +295,8 @@ def main(args):
 
     if args.distributed:
         model_full = DistributedDataParallel(model_full.cuda(), device_ids=[args.gpu])
+        # if not config.network.fix_text:
+        #     classes_features = DistributedDataParallel(classes_features.cuda(), device_ids=[args.gpu])
         model_without_ddp = model_full.module
 
 
@@ -389,6 +402,14 @@ def train(model, train_loader, optimizer, criterion, scaler,
                          'Loss {loss.val:.4f} ({loss.avg:.4f})'.format(
                              epoch, i, len(train_loader), eta_sec, batch_time=batch_time, data_time=data_time, loss=losses,
                              lr=optimizer.param_groups[-1]['lr'])))  # TODO
+            # log to wandb
+            wandb.log({
+                "train/loss": losses.avg,
+                "train/lr": optimizer.param_groups[-1]['lr'],
+                "train/eta": eta_sec,
+                "train/epoch": epoch,
+                "train/iter": cur_iter,
+            })
 
 
 
@@ -423,6 +444,13 @@ def validate(epoch, val_loader, device, model, config, text_embedding, logger):
                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                      'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
                          i, len(val_loader), top1=top1, top5=top5)))
+                # log to wandb
+                wandb.log({
+                    "val/prec@1": top1.avg,
+                    "val/prec@5": top5.avg,
+                    "val/epoch": epoch,
+                    "val/iter": epoch * len(val_loader) + i,
+                })
 
     logger.info(('Testing Results: Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'
         .format(top1=top1, top5=top5)))
@@ -430,6 +458,7 @@ def validate(epoch, val_loader, device, model, config, text_embedding, logger):
 
 
 if __name__ == '__main__':
+    wandb.login()
     args = get_parser() 
     main(args)
 
